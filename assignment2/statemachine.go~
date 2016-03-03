@@ -1,0 +1,195 @@
+package main
+
+import (
+		"fmt"
+		"sync"
+		"time"
+		"io"
+		"math/rand"
+}
+
+// change this
+const (
+	follower 
+	candidate 
+	leader 
+)
+
+// change this
+
+
+const (
+	
+	heartbeatTimeout = 100 * time.Millisecond 
+	electionTimeout = 2 * heartbeatTimeout
+	
+)
+
+type Event interface{}
+
+type Action interface{}
+
+type Timeout struct {
+
+}
+
+type appendData struct	{
+	commandName []byte
+}
+
+
+
+type LogItems struct {
+	term int
+	commandName []byte
+	//uniqueId uint64
+	commited bool
+}
+
+type requestAppendEntries struct {
+	senderID int	
+	senderTerm int
+	prevLogTerm int
+	prevLogIndex int
+	//leaderId uint64
+	log []LogItems
+	commitIndex int
+}
+
+type responseAppendEntries struct {
+	senderID int	
+	senderTerm int 	
+	
+	success bool
+	
+}
+
+/*type appendEntriesChannel struct {
+	request requestAppendEntries
+	response chan responseAppendEntries
+}*/
+
+type requestVote struct {
+	term int
+	candidateId int
+	prevLogTerm int
+	prevLogIndex int
+}
+
+/*type responseVoteDC struct {
+	term uint64
+	senderID uint64
+	voteGranted bool
+}*/
+
+type responseVote struct {
+	senderID int
+	senderTerm int
+	voteGranted bool
+}
+
+
+type sendAction struct {
+		intendedReceiverID int,
+		event Event
+}
+//send action, commit action, alarm action, logstore action, statestore action
+
+
+
+type Server struct {
+	serverID int
+	leaderID int
+	votedFor int
+	term int
+	peerIDs []int
+	state int
+	active bool
+	timer float64
+	log []LogItems
+	commitIndex int
+	lastLogIndex int
+	lastLogTerm int
+	voteReceived map[int]bool
+
+	nextIndex map[int]uint64
+	matchIndex map[int]uint64
+}
+
+
+
+func newLog() *LogItems {
+	l := &LogItems{[]LogItems{}}
+	return l
+}
+
+func intializeNewServer(id int,leader int,votedFor int, term int, peerIDs []int, state int, active bool,timer float64,commitIndex int,lastLogTerm int,lastLogIndex int,voteReceived map[int]bool,nextIndex map[int]int,matchIndex map[int]int) *Server {
+
+	// create log for the server
+	log := newLog()
+	//server Server
+	server := &Server { id,
+						leader,
+						votedFor,
+						term,
+						peerIDs,
+						follower, 
+						active,
+						timer,
+						log,
+						commitIndex,
+						lastLogIndex,
+						lastLogTerm,
+						voteReceived,
+						nextIndex,
+						matchIndex }
+
+	return server
+
+}
+
+
+
+func(server *Server) requestAppendEntriesRPC(serverIDs []int) []Action {
+	for i:=0; i<len(serverIDs);i++ {
+		prevLogIndex := server.nextIndex[serverIDs[i]]-1
+		prevLogTerm := server.log[prevLogIndex].term
+		entries := server.log[server.nextIndex[serverIDs[i]]:]
+		requestAppend := requestAppendEntries {
+													server.serverID,
+													server.term,
+													prevLogTerm,
+													prevLogIndex,
+													entries,
+													server.commitIndex
+												}
+
+		send := sendAction{serverIDs[i],requestAppend}
+		actions := append(actions, send)   
+	}
+
+	return actions
+}
+
+
+func(server *Server) handlerequestAppendEntriesRPC(event Event) []Action{
+
+	
+}
+
+func (server *Server) start() {
+	server.active = true
+
+	for server.active {
+		switch server.state {
+			case follower : 
+				server.handleFollower()
+			case candidate :
+				server.handleCandidate()
+			case leader :
+				server.handleLeader()
+
+		}
+	}
+}
+
