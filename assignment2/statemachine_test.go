@@ -310,3 +310,145 @@ func TestTimeoutLeader(t *testing.T) {
 		
 	}
 }
+
+
+func TestHandleRequestAppendEntriesFollower(t *testing.T){
+	var server *Server
+	server = &Server{} 
+	var actions []Action
+	
+	server.serverID = 3
+	server.leaderID = 5
+	server.votedFor = -1
+	server.term = 3
+	server.peerIDs = []int{1, 2, 4, 5}
+	server.state = "follower"
+	server.active = true
+	server.timer = float64(heartbeatTimeout)
+	server.log = []LogItems{{term:1},{term:2},{term:3}}
+	server.commitIndex = 2
+	server.lastLogIndex = 2
+	server.lastLogTerm = 3
+	server.lastMatchedIndex = 2
+	LogEntry := []LogItems{{term:4}}
+	requestAppendEntry := requestAppendEntries{5,4,2,3,LogEntry,2}
+	actions = server.handleEvents(requestAppendEntry)
+
+	if len(actions) != 0 {
+		switch actions[0].(type) {
+		case setTimer:
+			fmt.Println("TestHandleRequestAppendEntriesFollower: timer is reset")
+		default:
+			t.Error("TestHandleRequestAppendEntriesFollowerERROR: timer is not reset")
+		}
+
+		switch actions[1].(type) {
+		case LogStoreAction:
+			fmt.Println("TestHandleRequestAppendEntriesFollower: log entries are stored")
+		default:
+			t.Error("TestHandleRequestAppendEntriesFollowerERROR: logstore")
+		}
+
+		switch actions[2].(type) {
+		case StateStoreAction:
+			fmt.Println("TestHandleRequestAppendEntriesFollower: state is updated")
+		default:
+			t.Error("TestHandleRequestAppendEntriesFollowerERROR: statestore")
+		}
+
+		switch actions[3].(type) {
+		case sendAction:
+			fmt.Println("TestHandleRequestAppendEntriesFollower: sendAction")
+			send := actions[3].(sendAction)
+			switch send.event.(type){
+			case responseAppendEntries :
+				fmt.Println("TestHandleRequestAppendEntriesFollower: responseAppendEntries in sendAction")
+				responseAppendEntry := send.event.(responseAppendEntries)
+				if responseAppendEntry.senderID != 3 || responseAppendEntry.senderTerm != 4 || responseAppendEntry.senderLastMatchedIndex != 3 || responseAppendEntry.success != true {
+					t.Error("TestHandleRequestAppendEntriesFollowerERROR: responseAppendEntries values")
+				}
+			default:
+				t.Error("TestHandleRequestAppendEntriesFollowerERROR : responseAppendEntries")
+			}
+		default:
+			t.Error("TestHandleRequestAppendEntriesFollowerERROR: sendAction")
+		
+		}
+	} else {
+		t.Error("no actions returned")
+	}
+}
+
+func TestHandleRequestAppendEntriesCandidate(t *testing.T){
+	var server *Server
+	server = &Server{} 
+	var actions []Action
+	
+	server.serverID = 1
+	server.leaderID = 5
+	server.votedFor = -1
+	server.term = 3
+	server.peerIDs = []int{2, 3, 4, 5}
+	server.state = "candidate"
+	server.active = true
+	server.timer = float64(heartbeatTimeout)
+	server.log = []LogItems{{term:1},{term:2},{term:3}}
+	server.lastLogIndex = 2
+	server.lastLogTerm = 3
+	server.lastMatchedIndex = 2
+	LogEntry := []LogItems{{term:4}}
+	requestAppendEntry := requestAppendEntries{5,4,2,3,LogEntry,2}
+	actions = server.handleEvents(requestAppendEntry)
+	
+	if server.state != "follower" {
+		t.Error("TestHandleRequestAppendEntriesCandidateERROR: state is not updated")
+	}
+	if len(actions) != 0 {
+		switch actions[0].(type) {
+		case setTimer:
+			fmt.Println("TestHandleRequestAppendEntriesCandidate: timer is reset")
+		default:
+			t.Error("TestHandleRequestAppendEntriesCandidateERROR: timer is not reset")
+		}
+
+		switch actions[1].(type) {
+		case LogStoreAction:
+			fmt.Println("TestHandleRequestAppendEntriesCandidate: log entries are stored")
+		default:
+			t.Error("TestHandleRequestAppendEntriesCandidateERROR: logstore")
+		}
+
+		switch actions[2].(type) {
+		case StateStoreAction:
+			fmt.Println("TestHandleRequestAppendEntriesCandidate: state is updated")
+		default:
+			t.Error("TestHandleRequestAppendEntriesCandidateERROR: statestore")
+		}
+
+	/*	switch actions[3].(type) {
+		case sendAction:
+			fmt.Println("TestHandleRequestAppendEntriesCandidate: sendAction")
+			send := actions[3].(sendAction)
+			switch send.event.(type){
+			case responseAppendEntries :
+				fmt.Println("TestHandleRequestAppendEntriesCandidate: responseAppendEntries in sendAction")
+				responseAppendEntry := send.event.(responseAppendEntries)
+				if responseAppendEntry.senderID != 3 || responseAppendEntry.senderTerm != 4 || responseAppendEntry.senderLastMatchedIndex != 3 || responseAppendEntry.success != true {
+					t.Error("TestHandleRequestAppendEntriesCandidateERROR: responseAppendEntries values")
+				}
+			default:
+				t.Error("TestHandleRequestAppendEntriesCandidateERROR : responseAppendEntries")
+			}
+		default:
+			t.Error("TestHandleRequestAppendEntriesCandidateERROR: sendAction")
+		
+		}*/
+
+	} else {
+		t.Error("TestHandleRequestAppendEntriesCandidateERROR: no actions returned")
+	}
+}
+
+/*func TestHandleRequestAppendEntriesLeader(t *Testing.T){
+
+}*/

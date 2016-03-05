@@ -286,8 +286,8 @@ func(server *Server) handleRequestAppendEntries(event Event) []Action {
 				//put entries one by one into this server's log 
 
 				for i:=0; i<len(logEntries); i++ {
-					server.log = append (server.log,logEntries[i])
 					server.lastLogIndex++
+					server.log = append (server.log,logEntries[i])
 					server.lastLogTerm = server.log[server.lastLogIndex].term
 					server.lastMatchedIndex = server.lastLogIndex
 					
@@ -381,7 +381,7 @@ func(server *Server) handleRequestAppendEntries(event Event) []Action {
 
 				//now you have processed the append request entries rpc, so you have to send append response to leader.
 				responseAppendEntry := responseAppendEntries{server.serverID,server.term,server.lastMatchedIndex,true}
-				send := sendAction {senderID,responseAppendEntry}
+				send := sendAction{senderID,responseAppendEntry}
 				actions = append(actions,send)
 			}
 
