@@ -30,12 +30,7 @@ type NetConfig struct {
 	Port int
 }
 
-//type CommitInfo {
-//	Data []byte
-//	Index int
-//	Err error
-//}
-//
+
 type CommitInfo CommitAction  // leaderID, commitIndex, committedEntry, errorMsg
 //
 type StateInfo StateStoreAction // term, votedFor, lastMatchedIndex
