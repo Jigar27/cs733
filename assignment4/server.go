@@ -5,13 +5,21 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/Jigar27/cs733/assignment4/fs"
+	// "fs"
 	"net"
 	"os"
 	"strconv"
 	//"errors"
+	"encoding/json"
+	"encoding/gob"
+	"bytes"
+	"sync"
+	//"time"
+	//"math/rand"
+	"os/exec"	
 )
 
-type clientMap struc {
+type clientMap struct {
 	sync.Mutex
 	cMap map[int]*net.TCPConn
 }
@@ -24,9 +32,40 @@ var clientConnMap clientMap
 var host string
 var port int
 
+//########################################################### methods for map###############################################################
+
+func (clMap *clientMap) make() {
+	clMap.Lock()
+	defer clMap.Unlock()
+	clMap.cMap = make(map[int]*net.TCPConn)
+}
 
 
-##########################################################################################
+func (clMap *clientMap) add(clientId int, connection *net.TCPConn) {
+	clMap.Lock()
+	defer clMap.Unlock()
+	clMap.cMap[clientId] = connection
+}
+
+
+func (clMap *clientMap) getValue(clientId int) (connection *net.TCPConn, result bool) {
+	clMap.Lock()
+	defer clMap.Unlock()
+	connection, result = clMap.cMap[clientId]
+	return connection, result
+}
+
+
+func (clMap *clientMap) remove(clientId int) {
+	clMap.Lock()
+	clMap.Unlock()
+	delete(clMap.cMap,clientId)
+}
+
+//###############################################   misc   ###########################################
+
+
+
 func getMin(a, b int64) int64 {
 	if a <= b {	
 		return a
@@ -43,7 +82,7 @@ func getMax(a, b int64) int64 {
 }
 
 
-func exexBashCommand(cmdString string) (err error) {
+func execBashCommand(cmdString string) (err error) {
 	var (
 		cmd *exec.Cmd
 	)
@@ -54,9 +93,26 @@ func exexBashCommand(cmdString string) (err error) {
 	err = cmd.Run()
 	return err
 }
-#############################################################################################
+//#############################################################################################
+
+//###############################################################################################
+func decode(data []byte) (msg *fs.Msg, err error) {
+	var buffer *bytes.Buffer
+	var	decoder *gob.Decoder
+	
+
+	// msg = &fs.Msg{}
+	msg = &fs.Msg{}
+	buffer = bytes.NewBuffer(data)
+	decoder = gob.NewDecoder(buffer)
+	err = decoder.Decode(msg)
+	return msg, err
+}
 
 
+
+
+//###################################################################################################
 
 func check(obj interface{}) {
 	if obj != nil {
@@ -89,7 +145,12 @@ func reply(conn *net.TCPConn, msg *fs.Msg) bool {
 	case 'M':
 		resp = "ERR_CMD_ERR"
 	case 'I':
-		resp = "ERR_INTERNAL"
+		resp = "ERR_INTERNAL"		
+	case 'R':
+		resp = "ERR_REDIRECT " + host + " " + strconv.Itoa(msg.ReDirPort)	
+	case 'T':
+		resp = "ERR_TRY_LATER"
+
 	default:
 		fmt.Printf("Unknown response kind '%c'", msg.Kind)
 		return false
@@ -103,36 +164,64 @@ func reply(conn *net.TCPConn, msg *fs.Msg) bool {
 	return err == nil
 }
 
-func serve(conn *net.TCPConn) {
-	reader := bufio.NewReader(conn)
+func serve(conn *net.TCPConn, clientId int) {
+	var response *fs.Msg
+	var msg *fs.Msg
+	var reader *bufio.Reader
+	
+	var	msgerr error
+	var	fatalerr error			
+	
+	var	err error
+	var	data []byte
+	reader = bufio.NewReader(conn)
 	for {
-		msg, msgerr, fatalerr := fs.GetMsg(reader)
+		msg, msgerr, fatalerr = fs.GetMsg(reader)
 		if fatalerr != nil || msgerr != nil {
 			reply(conn, &fs.Msg{Kind: 'M'})
-			conn.Close()
+			//conn.Close()
+			closeClientConnection(conn, clientId)
 			break
 		}
 
 		if msgerr != nil {
 			if (!reply(conn, &fs.Msg{Kind: 'M'})) {
-				conn.Close()
+				closeClientConnection(conn, clientId)
 				break
 			}
 		}
 
-		response := fs.ProcessMsg(msg)
+		if msg.Kind == 'r' {
+			response = fs.ProcessMsg(msg)
+			if !reply(conn, response) {
+				closeClientConnection(conn,clientId)
+				break
+			}
+		} else {
+			msg.ClientId =clientId
+			data, err = encode(msg)
+			if err != nil {
+				reply(conn, &fs.Msg{Kind:'I'})
+				closeClientConnection(conn, clientId)
+				break
+			}
+			raftnode.Append(data)
+		}
+
+		
+		/*response := fs.ProcessMsg(msg)
 		if !reply(conn, response) {
 			conn.Close()
 			break
-		}
+		}*/
 	}
 }
 
 func startServer() {
 	var clientId int
 	clientId = 0
-	host = "127.0.0.1"
-	port = 6000 + id
+	host = "localhost"
+	port = 5000 + id
 	//
 	clientConnMap.make()
 	tcpaddr, err := net.ResolveTCPAddr("tcp", host + ":" + strconv.Itoa(port))
@@ -148,27 +237,27 @@ func startServer() {
 
 		// once you accept the connection then add clientid and connection handler in the map so that clienthandler will eventually reply to correct client
 		clientConnMap.add(clientId,tcp_conn)
-		go serve(tcp_conn)
+		go serve(tcp_conn, clientId)
 	}
 }
 
 
 func initializeRaft() {
 
-	var configuration Config // // this configuration is in Config structure format
+	var configuration *Config // // this configuration is in Config structure format
 	var err error
 	var configFile *os.File //file discriptor
 	var filename string
 	var decoder *json.Decoder
 	//var config Config   
 
-	filename = "config" + strconv.Itoa(id) + ".json"
+	filename = "config/config" + strconv.Itoa(id) + ".json"
 	configFile, err = os.Open(filename)
 	if err != nil {
 		fmt.Println("server.go_initializeRaft_ERR_Opening_json")
 	}
 	defer configFile.Close()
-
+	//this decoder will read the json file and help to fill up config.Config
 	decoder = json.NewDecoder(configFile)
 	err = decoder.Decode(&configuration)
 
@@ -183,10 +272,111 @@ func initializeRaft() {
 
 }
 
+func startFileServer() {
+	var ch <- chan CommitInfo
+	var result bool
+	var commitInfo CommitInfo
+	var msg *fs.Msg
+	var	conn *net.TCPConn
+	var i int64
+	var leaderPort int
+	var logItem LogItems
+	var err error
+	var response *fs.Msg
+	var lastComIndex int64// this value tells the file server that from which log entry index to latest commit index are commited entries 
+	lastComIndex = -1
+	ch = raftnode.CommitChannel() // use Node interface method to get the channel to listen from the raftnode
+
+	//continuously receive from commit channel
+
+	for {
+		commitInfo = <- ch //receive from commit channel
+		fmt.Println(id,commitInfo.LeaderID,commitInfo.CommitIndex,commitInfo.ErrorMsg)
+
+		if commitInfo.ErrorMsg != nil {
+			msg,err = decode(commitInfo.CommittedEntry.CommandName)
+			if err != nil {
+				fmt.Println("server.go_startFileServer_ERR_decodingCommandname")
+			}
+
+			conn, result = clientConnMap.getValue(msg.ClientId)
+
+			//reply to corresponding client
+
+			switch commitInfo.ErrorMsg.Error(){
+
+			case "ERR_CONTACT_LEADER" :
+				leaderPort = 6000 + commitInfo.LeaderID
+				reply(conn, &fs.Msg{Kind: 'R', ReDirPort: leaderPort})
+
+			case "ERR_TRY_LATER" :
+				reply(conn, &fs.Msg{Kind: 'T'})
+
+			default:
+			}
+		} else {
+			// no ErrorMsg in CommitInfo CommitAction, this means details about commited entries has arrived
+			//remember CommitIndex points to last committed entry. in face all entries from lastCommitIndex to CommitIndex are commited entries.
+
+			for i = lastComIndex+1; i<= commitInfo.CommitIndex; i++ {
+				// to get the logitems use Get() provided in interface of raftnode
+
+				logItem, err = raftnode.Get(i)
+				if err != nil {
+					fmt.Println("server.go_startFileServer_ERR_Get(index)")
+				}
+
+				msg, err = decode(logItem.CommandName)
+				if err != nil {
+					fmt.Println("server.go_startFileServer_ERR_decode(logItem.CommandName)")
+				}
+
+				response = fs.ProcessMsg(msg)
+
+				conn, result = clientConnMap.getValue(msg.ClientId)
+				if result {
+
+				}
+				/*if result {
+					utils.Assert(ci.LeaderId == selfId, "startfs: clientid found but it is not a leader")
+					reply(conn, response)
+				}*/
+
+				if commitInfo.LeaderID == id {
+					reply(conn,response)
+				}			
+			}  
+			/*if commitInfo.CommitIndex >= lastCommitIndex {
+				lastCommitIndex = CommitInfo.CommitIndex
+			}*/
+
+			lastComIndex = getMax(lastComIndex,commitInfo.CommitIndex)
+		} 
+	}
+
+}
+
+
+func encode(msg *fs.Msg) (data []byte, err error) {
+	var encoder *gob.Encoder
+
+	buffer := &bytes.Buffer{}
+	encoder = gob.NewEncoder(buffer)
+	err = encoder.Encode(msg)
+	return buffer.Bytes(), err
+}
+
+
+func closeClientConnection(conn *net.TCPConn, clientId int) {
+	conn.Close()
+	clientConnMap.remove(clientId)
+}
+
 func serverMain(serverId int) {
-	id = serverId
+	id = serverId // global variable
 	initializeRaft()
 	go startServer()
+	startFileServer()
 	/*tcpaddr, err := net.ResolveTCPAddr("tcp", "localhost:8080")
 	check(err)
 	tcp_acceptor, err := net.ListenTCP("tcp", tcpaddr)
@@ -208,6 +398,9 @@ func main() {
 		fmt.Println("USAGE: server <serverId>")
 	}
 
-	serverId = strconv.Atoi(os.Args[1])
+	serverId, err = strconv.Atoi(os.Args[1])
+	if err != nil {
+		fmt.Println("Invalid serverId")
+	}
 	serverMain(serverId)
 }
